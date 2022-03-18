@@ -1,0 +1,472 @@
+public class SoClo_ClickDataParser {
+    
+    public List<Click_Data__c> clickRecordSelected {get;set;}
+    private Set <Id> cIds = new Set <Id>();
+    
+    public List<Click_Data__c> clickRecordsNeedingPrep {get;set;}
+    public List<Click_Data__c> clickDataPrepped {get;set;}
+    public List<Click_Data__c> clickDataToParse {get;set;}
+    
+    public List<Opportunity> preexistingJobsWithResourceAssignments {get;set;}
+    public List<Opportunity> jobsToCreate {get;set;}
+    
+    public List<OpportunityLineItem> preexistingResourceAssignments {get;set;}   
+    public List<OpportunityLineItem> resourceAssignmentsToCreate {get;set;}
+    
+    public List<Opportunity> preexistingJobsWithProjects {get;set;}
+    public List<amc__Project__c> projectsToCreate {get;set;}
+    
+    public List<amc__Milestone__c> preexistingMilestones {get;set;}
+    public List<amc__Milestone__c> milestonesToCreate {get;set;}
+    
+    public Map<String,Opportunity> preexistingJobsByEventId {get;set;}
+    public Map<String,Opportunity> newJobsByEventId {get;set;}
+    public Map<String,List<Opportunity>> allJobsByEventId {get;set;}    
+    
+    public Map<String,List<OpportunityLineItem>> preexistingResourceAssignmentByEventTask {get;set;}
+    public Map<String,OpportunityLineItem> newResourceAssignmentsByEventTask {get;set;} 
+    public Map<String,OpportunityLineItem> allResourceAssignmentsByEventTask {get;set;} 
+    
+    public Map<String,amc__Project__c> projectsByEventId {get;set;} 
+    
+    public Map<String,Click_Data__c> oldClickDataByEventTask {get;set;}
+    public List<Click_Data__c> oldClickData {get;set;}
+    
+    
+    public List<ClickDataWrapper> clickResoureAssignments {get;set;}
+    public List<ClickDataWrapper> clickJobs {get;set;}
+    
+    public Set<String> eventIds {get;set;}
+    private Set<String> skillCodes = new Set<String>(); 
+    private Set<String> aeics = new Set<String>(); 
+    private Set<String> eventTasks = new Set<String>();
+    public Set<Id> newClickIds = new Set<Id>();
+    
+    
+    public SoClo_ClickDataParser(ApexPages.StandardSetController standardController ){
+        clickDataToParse = new List<Click_Data__c>(); 
+        eventIds = new Set<String>(); 
+        clickRecordSelected = new List<Click_Data__c>(); 
+        clickRecordsNeedingPrep= new List<Click_Data__c>();
+        oldClickData = new List<Click_Data__c>();
+        preexistingJobsWithResourceAssignments = new List<Opportunity>(); 
+        jobsToCreate = new List<Opportunity>(); 
+        preexistingJobsByEventId = new Map<String,Opportunity>();
+        newJobsByEventId = new Map<String,Opportunity>();
+        allJobsByEventId = new Map<String,List<Opportunity>>();
+        newResourceAssignmentsByEventTask = new Map<String,OpportunityLineItem>();
+        preexistingResourceAssignmentByEventTask = new Map<String,List<OpportunityLineItem>>();      
+        allResourceAssignmentsByEventTask = new Map<String,OpportunityLineItem>();
+        preexistingResourceAssignments = new List<OpportunityLineItem>();
+        resourceAssignmentsToCreate = new List<OpportunityLineItem>();
+        preexistingJobsWithProjects = new List<Opportunity>();
+        projectsToCreate = new List<amc__Project__c>();
+        projectsByEventId = new Map<String,amc__Project__c>(); 
+        preexistingMilestones = new List<amc__Milestone__c>();
+        milestonesToCreate = new List<amc__Milestone__c>();
+        clickResoureAssignments = new List<ClickDataWrapper>();
+        clickJobs = new List<ClickDataWrapper>();
+        
+        //Get all click records selected in the click data listview
+        for (Click_Data__c cData : (List<Click_Data__c>)standardController.getSelected() ){            
+            cIds.add(cData.Id);           
+        }
+        clickRecordSelected = [Select Id, Name, Truncated_Click_Id__c, Skill__c,Task_Nbr__c, Field_Class__c, AEIC_Formula__c, Event_Task__c, Processed__c, Unit__c, Site__c  From Click_Data__c Where Id IN:cIds];
+        checkForUnprepped();
+        getOldClickData();
+        jobAssessment();
+        resourceAssignmentAssessment();
+    }
+    
+    
+    
+    
+    //This method loops over selected click data records, stores relevant data for later queries, and calls the prep method if data was not preped correctly
+    public void checkForUnprepped(){
+        
+        for (Click_Data__c cData : clickRecordSelected){            
+            //Store revelent data for later
+            eventIds.add(cData.Truncated_Click_Id__c);
+            skillCodes.add(cData.Field_Class__c);
+            aeics.add(cData.AEIC_Formula__c);
+            eventTasks.add(cData.Event_Task__c);
+            newClickIds.add(cData.Id);
+            if(cData.Processed__c==false){
+                //Call prep method
+                clickRecordsNeedingPrep.add(cData); 
+            }
+        }       
+        if(clickRecordsNeedingPrep.size()==0&&clickRecordSelected.size()>0){
+            ApexPages.addmessage(new ApexPages.message(ApexPages.Severity.Confirm, 'All click records seleced are prepped.'));
+        }
+        if(clickRecordSelected.size()==0){
+            ApexPages.addmessage(new ApexPages.message(ApexPages.Severity.ERROR, 'You did not select any records in the list view.'));
+        }
+    }
+    //This method preps click data
+    public void prepData(){
+        
+        Map<String,amc__Skill__c> mapOfSkillsBySkillCode = new Map<String,amc__Skill__c>();
+        Map<String,Units__c> mapOfUnitsByAeic = new Map<String,Units__c>();
+        Map<String,Product2> mapOfProductsBySkillCode = new Map<String,Product2>();
+        Set<String> customerSiteIds = new Set<String>();
+        Map<String,Legacy_Site__c> mapsOfLaegacySitesByCustomerSite = new Map<String,Legacy_Site__c>();
+        Pricebook2  stBook = [select Id from Pricebook2 where isStandard = true limit 1];
+        Product2 serviceProduct = [Select Id From Product2 Where Name = 'Service' Limit 1];
+        Product2 skillProduct;
+        
+        
+        
+        //Get skills by skill code
+        for(amc__Skill__c s : [Select Id, Skill_Code__c From amc__Skill__c Where Skill_Code__c IN: skillCodes]){
+            mapOfSkillsBySkillCode.put(s.Skill_Code__c,s);
+        }
+        //Get units by aeic
+        for(Units__c u : [Select Id, AEIC__c, Customer_Site__c From Units__c Where AEIC__c IN: aeics]){
+            mapOfUnitsByAeic.put(u.AEIC__c,u);
+            customerSiteIds.add(u.Customer_Site__c);
+        }
+        //Get products by skill code
+        for(Product2 p : [Select Id,ProductCode From Product2 Where ProductCode IN: skillCodes]){
+            mapOfProductsBySkillCode.put(p.ProductCode,p);
+        }
+        //Get legacy sites by customer site ids
+        for(Legacy_Site__c ls : [Select Id, Geo_Site__c, Customer_Account__c From Legacy_Site__c Where Geo_Site__c IN: customerSiteIds]){
+            mapsOfLaegacySitesByCustomerSite.put(ls.Geo_Site__c,ls);
+        }
+        
+        //Loop over click data
+        for (Click_Data__c cData : clickRecordsNeedingPrep){
+            
+            //Get Unit From Map
+            Units__c thisUnit = mapOfUnitsByAeic.get(cData.AEIC_Formula__c);
+            cData.Unit__c = thisUnit.Id;
+            cData.Customer_Site__c = thisUnit.Customer_Site__c;
+            
+            //Get Skill From Map
+            amc__Skill__c thisSkill = mapOfSkillsBySkillCode.get(cData.Field_Class__c);
+            cData.skill__c = thisSkill.Id;
+            
+            //Get Product From Map
+            Product2 thisProduct = mapOfProductsBySkillCode.get(cData.Field_Class__c);
+            if(thisProduct==null){
+                cData.Resource_Assignment__c = serviceProduct.Id;    
+            }else{
+                cData.Resource_Assignment__c = thisProduct.Id;    
+            }
+            
+            //Get Lagacy Site From Map
+            Legacy_Site__c thisLegacySite = mapsOfLaegacySitesByCustomerSite.get(thisUnit.Customer_Site__c);
+            cData.Legacy_Site__c = thisLegacySite.Id;
+            cData.Related_Account__c = thisLegacySite.Customer_Account__c;
+            
+            cData.PricebookEntryId__c = stBook.Id;
+            cData.Processed__c = true;
+            
+            //Add To List For Update
+            clickDataPrepped.add(cData);
+        }
+        clickRecordsNeedingPrep.clear();
+        update clickDataPrepped;
+        
+        if(clickDataPrepped.size()>0){
+            ApexPages.addmessage(new ApexPages.message(ApexPages.Severity.Confirm, 'All click data is ready to parse.'));
+        }
+    }
+    
+    //This method gets old click data
+    public void getOldClickData(){  
+        oldClickDataByEventTask = new Map<String,Click_Data__c>();
+        for(Click_Data__c cData: [Select Id, Name, Event_Task__c, Event_ID__c, Task_Nbr__c From Click_Data__c Where Related_To_Job__c = true And Id NOT IN :newClickIds And Event_ID__c IN:eventIds]){
+            
+            oldClickDataByEventTask.put(cData.Event_Task__c,cData); 
+            oldClickData.add(cData);
+        }
+        
+        
+    }
+    //This method deletes old click data
+    public void deleteOldClickData(){      
+        List<Click_Data__c> clickDataToDelete = new List<Click_Data__c>();
+        for(String s: oldClickDataByEventTask.keySet()){
+            clickDataToDelete.add(oldClickDataByEventTask.get(s)); 
+        }
+        delete clickDataToDelete;
+    }
+    //Create job for event it if needed
+    public void jobAssessment(){
+        clickDataToParse = [Select Id,Name,Event_Task__c,Resource_Start__c,Resource_Assignment__c,Event_ID__c,PricebookEntryId__c,Resource_End__c,Truncated_Click_Id__c,Task_Nbr__c,Unit__c,Site__c,Skill__c,AEIC__c,Related_Account__c,Changed_Date__c,Create_Date__c,GO_PSP_Elem__c,Breaker_End_del__c,Legacy_Site__c,Breaker_Start_del__c,Customer_Site__c,Unit_Frame_del__c From Click_Data__c Where Id IN: cIds];
+        //Get Job By Event Id
+        for(Opportunity opp: [Select Id,Event_ID__c,Site__c,Unit__c,Name,Product_Line__c,(Select Id,Product2Id,Related_Click_Data__c,Task_Number__c,Event_ID__c From OpportunityLineItems),(Select Id, Name,amc__Opportunity__c, amc__Status__c From amc__Projects__r) From Opportunity Where Event_ID__c IN:eventIds ]){
+            preexistingJobsByEventId.put(opp.Event_ID__c,opp); 
+            preexistingJobsWithResourceAssignments.add(opp);
+            
+            //************************************
+            if(!allJobsByEventId.containsKey(opp.Event_ID__c)){
+                allJobsByEventId.put(opp.Event_ID__c,new List<Opportunity>{opp}); 
+            }else{
+                List<Opportunity> tempList = allJobsByEventId.get(opp.Event_ID__c);
+                tempList.add(opp);
+                allJobsByEventId.put(opp.Event_ID__c,tempList);
+            }
+            
+            
+            if(opp.amc__Projects__r.size()>0){
+                preexistingJobsWithProjects.add(opp); 
+            }else{                 
+                amc__Project__c pro = createProject(opp);  
+                projectsToCreate.add(pro);                 
+            }
+        }
+        
+        
+        
+        for(Click_Data__c cData : clickDataToParse){
+            if(!preexistingJobsByEventId.containsKey(cData.Truncated_Click_Id__c)&&!newJobsByEventId.containsKey(cData.Truncated_Click_Id__c)){             
+                Opportunity job = createJob(cData);
+                jobsToCreate.add(job); 
+                newJobsByEventId.put(cData.Truncated_Click_Id__c,job);
+            }
+        }
+        
+        for(Opportunity job: jobsToCreate){
+            //************************************ Map<String,List<Opportunity>>
+            if(!allJobsByEventId.containsKey(job.Event_ID__c)){
+                allJobsByEventId.put(job.Event_ID__c,new List<Opportunity>{job}); 
+            }else{
+                List<Opportunity> tempList = allJobsByEventId.get(job.Event_ID__c);
+                tempList.add(job);
+                allJobsByEventId.put(job.Event_ID__c,tempList);
+            }
+            
+        }
+        for(amc__Project__c pro : projectsToCreate){
+            projectsByEventId.put(pro.amc__Opportunity__r.Event_ID__c,pro);
+        }
+    }
+    
+    
+    public void createJobs(){
+        insert jobsToCreate;
+    }
+    public void resourceAssignmentAssessment(){
+        
+        //Get Resource Assignment By Event/Task       
+        for(OpportunityLineItem oli: [Select Id, Event_Task__c,Related_Click_Data__c,Task_Number__c,Product2Id,OpportunityId,Name,Event_ID__c From OpportunityLineItem Where Event_Task__c IN:eventTasks ]){
+            if(!preexistingResourceAssignmentByEventTask.containsKey(oli.Event_Task__c)){
+                preexistingResourceAssignmentByEventTask.put(oli.Event_Task__c,new List<OpportunityLineItem>{oli}); 
+            }else{
+                List<OpportunityLineItem> tempList = preexistingResourceAssignmentByEventTask.get(oli.Event_Task__c);
+                tempList.add(oli);
+                preexistingResourceAssignmentByEventTask.put(oli.Event_Task__c,tempList);
+            }
+            
+            preexistingResourceAssignments.add(oli);
+            allResourceAssignmentsByEventTask.put(oli.Event_Task__c,oli);
+        }
+        
+        for(Click_Data__c cData : clickDataToParse){
+            if(!preexistingResourceAssignmentByEventTask.containsKey(cData.Event_Task__c)&&!allResourceAssignmentsByEventTask.containsKey(cData.Event_Task__c)){ 
+                OpportunityLineItem ra = createResourceAssignment(cData);
+                resourceAssignmentsToCreate.add(ra);
+                newResourceAssignmentsByEventTask.put(cData.Event_Task__c,ra);
+            }else{
+                List<OpportunityLineItem> tempList = preexistingResourceAssignmentByEventTask.get(cData.Event_Task__c);
+                clickResoureAssignments.add(new ClickDataWrapper(cData,tempList));  
+            }          
+        }
+        
+        for(OpportunityLineItem ra: resourceAssignmentsToCreate){
+            allResourceAssignmentsByEventTask.put(ra.Event_Task__c,ra);
+        }
+    }
+    
+    public void updateResourceAssignments(){
+        
+        Set<Integer> unresolvedWrapIndex = new Set<Integer>();
+        Integer wrapIndex = 0;
+        
+        for(ClickDataWrapper cWrapper : clickResoureAssignments){           
+            
+            Boolean oneSelected = false;
+            Integer raCount = cWrapper.ras.size();
+            Integer raCounter = 1; 
+            for(subObjWrapper raWrapper : cWrapper.ras){
+                
+                if(raWrapper.selected==true&&oneSelected==true){
+                    unresolvedWrapIndex.add(wrapIndex);
+                } 
+                if(raWrapper.selected==true){
+                    oneSelected = true; 
+                }
+                if(raCount==raCounter&&oneSelected==false){
+                    unresolvedWrapIndex.add(wrapIndex); 
+                }
+                raCounter = raCounter+1; 
+            }
+            wrapIndex = wrapIndex+1;
+        }
+        
+        for (Integer i = (clickResoureAssignments.size()-1); i >= 0; i--) {
+            ClickDataWrapper cdw = clickResoureAssignments[i];
+            Click_Data__c cd = cdw.clickRecord;
+            Integer clickIndex = clickDataToParse.indexOf(cd);
+            if(!unresolvedWrapIndex.contains(i)){
+                clickDataToParse.remove(clickIndex);
+                clickResoureAssignments.remove(i);
+            }else{
+                
+                
+                //update resource assignment with new click data record
+                //check for action record
+                
+            }
+        }
+        if(clickResoureAssignments.size()>0){
+            ApexPages.addmessage(new ApexPages.message(ApexPages.Severity.ERROR, 'You must select one resource assignment to update.'));
+        }
+        if(clickResoureAssignments.size()>0&&clickDataToParse.size()>0){
+            for(Click_Data__c cData: clickDataToParse){           
+                clickJobs.add(new ClickDataWrapper(cData,allJobsByEventId.get(cData.Truncated_Click_Id__c)));
+            }
+        }
+        
+    }
+    
+    public void selectJobForResourceAssignment(){
+        Set<Integer> unresolvedWrapIndex = new Set<Integer>();
+        Integer wrapIndex = 0;
+        
+        for(ClickDataWrapper cWrapper : clickJobs){           
+            
+            Boolean oneSelected = false;
+            Integer raCount = cWrapper.ras.size();
+            Integer raCounter = 1; 
+            for(subObjWrapper raWrapper : cWrapper.ras){
+                
+                if(raWrapper.selected==true&&oneSelected==true){
+                    unresolvedWrapIndex.add(wrapIndex);
+                } 
+                if(raWrapper.selected==true){
+                    oneSelected = true; 
+                }
+                if(raCount==raCounter&&oneSelected==false){
+                    unresolvedWrapIndex.add(wrapIndex); 
+                }
+                raCounter = raCounter+1; 
+            }
+            wrapIndex = wrapIndex+1;
+        }
+        for (Integer i = (clickJobs.size()-1); i >= 0; i--) {
+            ClickDataWrapper cdw = clickJobs[i];
+            if(!unresolvedWrapIndex.contains(i)){
+                clickJobs.remove(i);
+            }else{
+              //create resource assignment for existing job              
+            }
+        }
+        if(clickJobs.size()>0){
+            ApexPages.addmessage(new ApexPages.message(ApexPages.Severity.ERROR, 'You must select one job for each resource click record.'));
+        }
+        //insert resourceAssignmentsToCreate;
+    }
+    
+
+    public Opportunity createJob(Click_Data__c cData){ 
+        Opportunity job = new Opportunity();              
+        job.AEIC__c = cData.AEIC__c;
+        job.AccountId = cData.Related_Account__c;
+        job.Click_Changed_Date__c = cData.Changed_Date__c;
+        job.Click_Create_Date__c =  cData.Create_Date__c;
+        job.CloseDate = system.today();
+        job.Event_ID__c = cData.Truncated_Click_Id__c;
+        job.GO__c = cData.GO_PSP_Elem__c;
+        job.Job_End__c = cData.Breaker_End_del__c;
+        job.Legacy_Site__c = cData.Legacy_Site__c;
+        job.Name = '-';
+        job.Outage_Start__c = cData.Breaker_Start_del__c;
+        job.Site__c = cData.Customer_Site__c;
+        job.StageName = 'Forecasted';
+        job.Unit_Frame__c = cData.Unit_Frame_del__c;
+        job.Unit__c = cData.Unit__c;
+        return job;
+        //relate clicl data to job, mark as related to job
+    }
+    
+    public OpportunityLineItem createResourceAssignment(Click_Data__c cData){
+        OpportunityLineItem resourceAssignment = new OpportunityLineItem();
+        resourceAssignment.Skill__c = cData.Skill__c;
+        resourceAssignment.Resource_Start_Date__c = cData.Resource_Start__c;
+        resourceAssignment.Resource_End_Date__c = cData.Resource_End__c;
+        resourceAssignment.Task_Number__c = cData.Task_Nbr__c;
+        resourceAssignment.Quantity = 1;
+        resourceAssignment.UnitPrice = 0;
+        resourceAssignment.Related_Click_Data__c = cData.Id;
+        resourceAssignment.Click_Changed_Date__c = cData.Changed_Date__c;
+        resourceAssignment.Product2Id = cData.Resource_Assignment__c;
+        resourceAssignment.PricebookEntryId = cData.PricebookEntryId__c;
+        //Opportunity job = allJobsByEventId.get(cData.Event_ID__c);
+        resourceAssignment.Related_Click_Data__c = cData.Id;
+        //This will not work until I use insert
+        //resourceAssignment.OpportunityId = job.Id;
+        return resourceAssignment;
+    }
+    public amc__Project__c createProject(Opportunity job){
+        amc__Project__c pro = new amc__Project__c();
+        pro.Name = job.Name;
+        pro.amc__Opportunity__c = job.Id;
+        pro.amc__Status__c = 'Forcasted';
+        pro.Shift_Supervisor_Not_Applicable__c = true;
+        return pro;
+    }
+    public void createMilestone(){}
+    public void createAction(){} 
+    
+    public class ClickDataWrapper{
+        
+        public Click_Data__c  clickRecord {get; set;}       
+        public List<subObjWrapper> ras {get; set;} 
+        
+        public ClickDataWrapper(Click_Data__c cData, List<OpportunityLineItem> resourceAssignments){
+            clickRecord = cData;
+            ras = new List<subObjWrapper>();
+            if(resourceAssignments.size()==1){
+                ras.add(new subObjWrapper(resourceAssignments[0],true));  
+            }else{
+                for(OpportunityLineItem ra: resourceAssignments){
+                    ras.add(new subObjWrapper(ra,false)); 
+                }   
+            }            
+        }
+        
+        public ClickDataWrapper(Click_Data__c cData, List<Opportunity> jobs){
+            clickRecord = cData;
+            ras = new List<subObjWrapper>();
+            if(jobs.size()==1){
+                ras.add(new subObjWrapper(jobs[0],true));  
+            }else{
+                for(Opportunity job: jobs){
+                    ras.add(new subObjWrapper(job,false)); 
+                }   
+            }            
+        }
+        
+    }
+    public class subObjWrapper{
+        public Opportunity job {get; set;}
+        public OpportunityLineItem ra {get; set;}       
+        public Boolean selected {get; set;}
+        public Boolean disabled {get; set;}
+        
+        public subObjWrapper(OpportunityLineItem ras,Boolean oneRecord){
+            ra = ras;
+            selected = oneRecord;
+            disabled = oneRecord;
+        }
+        public subObjWrapper(Opportunity jo,Boolean oneRecord){
+            job = jo;
+            selected = oneRecord;
+            disabled = oneRecord;
+        }
+    }
+}
