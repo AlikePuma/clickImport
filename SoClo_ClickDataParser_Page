@@ -1,0 +1,204 @@
+<apex:page standardController="Click_Data__c" extensions="SoClo_ClickDataParser" recordSetVar="Member" lightningStylesheets="true">
+    <apex:pageMessages />
+    
+    <script type="text/javascript">
+
+    </script>
+    <apex:form >
+        
+        <apex:pageBlock Id="block1">
+            <apex:pageBlockButtons location="Bottom">
+                <apex:commandButton value="Back" onclick="window.history.back();" />
+                <apex:commandButton value="Refresh RAs" action="{!updateResourceAssignments}" rendered="{!If(clickResoureAssignments.size>0&&clickRecordSelected.size>0,true,false)}"/>
+                <apex:commandButton value="Prep Click Data" action="{!prepData}" rendered="{!If(clickRecordsNeedingPrep.size>0&&clickRecordSelected.size>0,true,false)}"/>
+                <apex:commandButton value="Click Job Wrapper" action="{!selectJobForResourceAssignment}"/>
+                <br/><br/> 
+            </apex:pageBlockButtons>           
+        </apex:pageBlock> 
+        
+        <apex:pageBlock title="resourceAssignmentsToCreate">
+            <apex:pageBlockTable value="{!resourceAssignmentsToCreate}" var="ra" >
+                <apex:column value="{!ra.Id}"/>
+                <apex:column value="{!ra.Product2Id}"/>
+                <apex:column value="{!ra.Related_Click_Data__c}"/>
+                <apex:column value="{!ra.Task_Number__c}"/>
+            </apex:pageBlockTable>
+        </apex:pageBlock>
+        
+        <apex:pageBlock title="clickDataToParse">
+            <apex:pageBlockTable value="{!clickDataToParse}" var="ra" >
+                <apex:column value="{!ra.Id}"/>
+                <apex:column value="{!ra.Name}"/>
+                <apex:column value="{!ra.Event_ID__c}"/>
+                <apex:column value="{!ra.Task_Nbr__c}"/>
+            </apex:pageBlockTable>
+        </apex:pageBlock>
+        
+        
+        
+        
+        
+        <apex:pageBlock id="PB4">
+            <apex:pageblockSection title="Please Choose Resource Assignment To Update" collapsible="true" columns="1" rendered="{!If(clickResoureAssignments.size>0,true,false)}">
+                <apex:pageBlockTable value="{!clickResoureAssignments}" var="click">                    
+                    <apex:column value="{!click.clickRecord.Name}"/>
+                    <apex:column value="{!click.clickRecord.Event_ID__c}"/> 
+                    <apex:column value="{!click.clickRecord.Task_Nbr__c}"/>
+                    <apex:column >
+                        <apex:pageBlock >                           
+                            <apex:pageBlockTable value="{!click.ras}" var="ras" rendered="true">
+                                <apex:column >
+                                    <apex:inputCheckbox disabled="{!ras.disabled}" required="true" value="{!ras.selected}" styleClass="primaryCheckboxes" id="inputId"  onclick="allowOnePrimary(this);"/>
+                                </apex:column>
+                                <apex:column value="{!ras.ra.Name}" />
+                                <apex:column value="{!ras.ra.Event_ID__c}" />
+                                <apex:column value="{!ras.ra.Task_Number__c}" />
+                            </apex:pageBlockTable>				
+                        </apex:pageBlock>                           
+                    </apex:column>
+                </apex:pageBlockTable>
+            </apex:pageblockSection>
+        </apex:pageBlock>
+        
+        <apex:pageBlock id="PB5">
+            <apex:pageblockSection title="Please Choose A Job For Resource Assignment" collapsible="true" columns="1">
+                <apex:pageBlockTable value="{!clickJobs}" var="click">                    
+                    <apex:column value="{!click.clickRecord.Name}"/>
+                    <apex:column value="{!click.clickRecord.Event_ID__c}"/> 
+                    <apex:column value="{!click.clickRecord.Task_Nbr__c}"/>
+                    <apex:column >
+                        <apex:pageBlock >                           
+                            <apex:pageBlockTable value="{!click.ras}" var="ras" rendered="true">
+                                <apex:column >
+                                    <apex:inputCheckbox disabled="{!ras.disabled}" required="true" value="{!ras.selected}" styleClass="primaryCheckboxes" id="inputId"  onclick="allowOnePrimary(this);"/>
+                                </apex:column>
+                                <apex:column value="{!ras.job.Name}" />
+                                <apex:column value="{!ras.job.Event_ID__c}" />
+                                
+                            </apex:pageBlockTable>				
+                        </apex:pageBlock>                           
+                    </apex:column>
+                </apex:pageBlockTable>
+            </apex:pageblockSection>
+        </apex:pageBlock>
+        
+        
+
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        <apex:pageBlock Id="block2" rendered="{!If(clickRecordSelected.size>0,true,false)}">
+            <apex:pageBlockSection id="section1" columns="1" collapsible="true" title="Click Data Records Selected - {!eventIds}">
+                <apex:pageBlockTable value="{!clickRecordSelected}" var="click" >
+                    <apex:column value="{!click.Name}"/>
+                    <apex:column value="{!click.Truncated_Click_Id__c}"/>
+                    <apex:column value="{!click.Task_Nbr__c}"/>  
+                    <apex:column value="{!click.Unit__c}"/>
+                    <apex:column value="{!click.Site__c}"/>
+                    <apex:column value="{!click.Skill__c}"/>
+                    <!--apex:column>
+<apex:selectList value="{!countries}" multiselect="false">
+<apex:selectOptions value="{!items}"/>
+</apex:selectList>
+</apex:column-->
+                </apex:pageBlockTable>
+            </apex:pageBlockSection>
+            <script> twistSection(document.getElementById('{!$Component.block2.section1}').getElementsByTagName('img')[0]) </script>
+            </apex:pageBlock>   
+            
+            <apex:pageBlock Id="block3" Title="Unprepaired Click Data" rendered="{!If(clickRecordsNeedingPrep.size>0&&clickRecordSelected.size>0,true,false)}">    
+                <apex:pageBlockSection id="section1" columns="1" collapsible="true" title="Click Data Records To Prep">
+                    <apex:pageBlockTable value="{!clickRecordsNeedingPrep}" var="click" >
+                        <apex:column value="{!click.Name}"/>
+                            <apex:column value="{!click.Truncated_Click_Id__c}"/>
+                                <apex:column value="{!click.Task_Nbr__c}"/>  
+                                    </apex:pageBlockTable> 
+                                </apex:pageBlockSection>
+                                <script> twistSection(document.getElementById('{!$Component.block3.section1}').getElementsByTagName('img')[0]) </script>
+        </apex:pageBlock>
+        
+        
+        
+        
+        
+        <apex:pageBlock Id="block4" rendered="{!If(preexistingJobsWithResourceAssignments.size>0&&clickRecordSelected.size>0,true,false)}">
+            <apex:pageBlockSection id="section1" columns="1" collapsible="true" title="Jobs With Their Resource Assignments In Salesforce For - {!eventIds}">
+                <apex:pageBlockTable value="{!preexistingJobsWithResourceAssignments}" var="job">                    
+                    <apex:column value="{!job.Name}" />                     
+                    <apex:column value="{!job.Event_ID__c}"/>
+                    <apex:column value="{!job.Site__c}"/>
+                    <apex:column value="{!job.Unit__c}"/>
+                    <apex:column value="{!job.Product_Line__c}"/>
+                    <apex:column >
+                        <apex:pageBlock >                           
+                            <apex:pageBlockTable value="{!job.OpportunityLineItems}" var="ra" rendered="true">                               
+                                <apex:column value="{!ra.Product2Id}"/>
+                                <apex:column value="{!ra.Related_Click_Data__c}"/>
+                                <apex:column value="{!ra.Task_Number__c}"/>                                                            
+                            </apex:pageBlockTable>                          							
+                        </apex:pageBlock>                                                                         
+                    </apex:column>
+                </apex:pageBlockTable>
+            </apex:pageblockSection>
+            <script> twistSection(document.getElementById('{!$Component.block4.section1}').getElementsByTagName('img')[0]) </script>
+            </apex:pageBlock>
+            
+            
+            
+            
+            
+            <apex:pageBlock Id="block5" rendered="{!If(jobsToCreate.size>0&&clickRecordSelected.size>0,true,false)}">
+                <apex:pageBlockSection id="section1" columns="1" collapsible="true" title="New - Jobs">
+                    <apex:pageBlockTable value="{!jobsToCreate}" var="job" >
+                        <apex:column value="{!job.Name}"/>
+                            <apex:column value="{!job.Event_ID__c}"/>
+                                <apex:column value="{!job.Site__c}"/>
+                                    <apex:column value="{!job.Unit__c}"/>                  
+                                        </apex:pageBlockTable>
+                                    </apex:pageBlockSection>
+                                    <script> twistSection(document.getElementById('{!$Component.block5.section1}').getElementsByTagName('img')[0]) </script>
+        </apex:pageBlock>
+        
+        
+        
+        
+        
+        
+        <apex:pageBlock Id="block14" rendered="{!If(preexistingJobsWithProjects.size>0&&clickRecordSelected.size>0,true,false)}">
+            <apex:pageBlockSection id="section1" columns="1" collapsible="true" title="Jobs With Their Projects In Salesforce For - {!eventIds}">
+                <apex:pageBlockTable value="{!preexistingJobsWithProjects}" var="job">                    
+                    <apex:column value="{!job.Name}" />                     
+                    <apex:column value="{!job.Event_ID__c}"/>
+                    <apex:column value="{!job.Site__c}"/>
+                    <apex:column value="{!job.Unit__c}"/>
+                    <apex:column value="{!job.Product_Line__c}"/>
+                    <apex:column >
+                        <apex:pageBlock >                           
+                            <apex:pageBlockTable value="{!job.amc__Projects__r}" var="pro" rendered="true">                               
+                                <apex:column value="{!pro.Name}"/>
+                                <apex:column value="{!pro.amc__Status__c}"/>
+                                
+                            </apex:pageBlockTable>                          							
+                        </apex:pageBlock>                                                                         
+                    </apex:column>
+                </apex:pageBlockTable>
+            </apex:pageblockSection>
+            <script> twistSection(document.getElementById('{!$Component.block14.section1}').getElementsByTagName('img')[0]) </script>
+            </apex:pageBlock>            
+            
+            
+            
+            
+            
+            
+            
+            </apex:form>
+            </apex:page>
